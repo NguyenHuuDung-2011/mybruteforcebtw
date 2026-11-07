@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-TARGET_URL_TEMPLATE = os.getenv("TARGET_URL_TEMPLATE", "https://example.com/search?q={cccd}")
 
-# Danh sách 63 tỉnh/thành phố chuẩn (chỉ giữ mã số)
+# Thay link mẫu bằng cấu trúc URL thực tế của bạn tại đây (ví dụ: chứa {cccd})
+BASE_URL = os.getenv("TARGET_URL_SITE")
+
 PROVINCES = [
     "001", "002", "003", "004", "005", "006", "007", "008", "009", "010",
     "011", "012", "013", "014", "015", "016", "017", "018", "019", "020",
@@ -22,22 +23,21 @@ PROVINCES = [
     "094", "095", "096"
 ]
 
-TARGET_PROVINCES = PROVINCES   # Tỉnh cần quét (Ví dụ: TP.HCM)
-YEARS = ["09", "10", "11"]   # Đã bổ sung năm sinh 2009, 2010 và 2011
-GENDERS = ["2", "3"]          # Giới tính
+TARGET_PROVINCES = PROVINCES   
+YEARS = ["09", "10", "11"]     
+GENDERS = ["2", "3"]          
 
-HARDCODE_MAX_LIMIT = 80000    # Mốc trần hardcode
+HARDCODE_MAX_LIMIT = 80000    
 REQUEST_DELAY = 0.3           
-PROGRESS_FILE = "progress.txt"
 
 def init_db():
-    """Tự động tạo bảng trên Neon DB nếu chưa tồn tại"""
     if not DATABASE_URL:
         print("[!] Lỗi: DATABASE_URL chưa được cấu hình trong .env")
         return
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
+        
         cur.execute("""
             CREATE TABLE IF NOT EXISTS scraped_records (
                 id SERIAL PRIMARY KEY,
@@ -47,10 +47,29 @@ def init_db():
                 scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS scan_progress (
+                id SERIAL PRIMARY KEY,
+                province VARCHAR(3) NOT NULL,
+                year VARCHAR(2) NOT NULL,
+                gender VARCHAR(1) NOT NULL,
+                current_seq INT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        
+        cur.execute("SELECT COUNT(*) FROM scan_progress;")
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "INSERT INTO scan_progress (province, year, gender, current_seq) VALUES (%s, %s, %s, %s);",
+                (TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0)
+            )
+            
         conn.commit()
         cur.close()
         conn.close()
-        print("[i] Đã kiểm tra và khởi tạo bảng thành công trên Neon DB!")
+        print("[i] Khởi tạo DB thành công!")
     except Exception as e:
         print(f"[!] Lỗi khởi tạo DB: {e}")
 
@@ -70,24 +89,43 @@ def save_to_neon(full_name: str, class_name: str, cccd: str):
     except Exception as e:
         print(f"[!] Lỗi ghi DB: {e}")
 
-def get_progress():
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip().split(",")
-            if len(content) == 4 and content[3].isdigit():
-                return content[0], content[1], content[2], int(content[3])
+def get_db_progress():
+    if not DATABASE_URL:
+        return TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT province, year, gender, current_seq FROM scan_progress LIMIT 1;")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return row[0], row[1], row[2], row[3]
+    except Exception as e:
+        print(f"[!] Lỗi đọc tiến độ: {e}")
     return TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
 
-def save_progress(prov: str, year: str, gender: str, seq: int):
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        f.write(f"{prov},{year},{gender},{seq}")
+def save_db_progress(prov: str, year: str, gender: str, seq: int):
+    if not DATABASE_URL:
+        return
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE scan_progress SET province = %s, year = %s, gender = %s, current_seq = %s, updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM scan_progress LIMIT 1);",
+            (prov, year, gender, seq)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[!] Lỗi lưu tiến độ: {e}")
 
 def run_scanner():
-    # Tự động tạo bảng ngay khi chạy worker
     init_db()
     
-    cur_prov, cur_year, cur_gender, cur_seq = get_progress()
-    print(f"[i] Bắt đầu quét từ Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
+    cur_prov, cur_year, cur_gender, cur_seq = get_db_progress()
+    print(f"[i] Tiếp tục quét từ DB - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SingleScanner"
@@ -112,9 +150,10 @@ def run_scanner():
 
                 for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
                     cccd = f"{prefix}{seq:06d}"
-                    save_progress(prov, year, gender, seq)
+                    save_db_progress(prov, year, gender, seq)
                     
-                    url = TARGET_URL_TEMPLATE.format(cccd=cccd)
+                    # Dùng trực tiếp biến BASE_URL định nghĩa ở trên
+                    url = BASE_URL.format(cccd=cccd)
                     
                     try:
                         response = requests.get(url, headers=headers, timeout=10)
@@ -140,4 +179,4 @@ def run_scanner():
                     
                     time.sleep(REQUEST_DELAY)
 
-    print("[i] Đã hoàn thành toàn bộ dải quét cho các năm 09, 10, 11!")
+    print("[i] Đã hoàn thành toàn bộ dải quét trên toàn quốc!")
