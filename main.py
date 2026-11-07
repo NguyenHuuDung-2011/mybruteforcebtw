@@ -1,7 +1,7 @@
 import os
 import threading
 from flask import Flask, render_template
-import psycopg2
+import psycopg
 from dotenv import load_dotenv
 from bruteforcer import run_scanner
 
@@ -15,7 +15,7 @@ def get_all_records():
     if not DATABASE_URL:
         return []
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute("SELECT full_name, cccd, scanned_at FROM scanned_records ORDER BY id DESC;")
         records = cur.fetchall()
