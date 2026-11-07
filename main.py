@@ -3,7 +3,7 @@ import threading
 from flask import Flask, render_template
 import psycopg2
 from dotenv import load_dotenv
-from bruteforcer import run_scanner
+from bruteforcer import run_scanner, init_db
 
 load_dotenv()
 
@@ -37,6 +37,7 @@ def start_background_scanner():
     scanner_thread.start()
 
 if __name__ == "__main__":
+    init_db()  # Khởi tạo DB nếu chưa có
     # Kích hoạt luồng quét ngầm ngay khi app khởi động
     start_background_scanner()
     
