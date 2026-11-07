@@ -2,7 +2,7 @@ import os
 import time
 import requests
 from bs4 import BeautifulSoup
-import psycopg
+import psycopg2
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,7 +35,7 @@ def init_db():
         print("[!] Lỗi: DATABASE_URL chưa được cấu hình trong .env")
         return
     try:
-        conn = psycopg.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
         cur.execute("""
@@ -77,7 +77,7 @@ def save_to_neon(full_name: str, class_name: str, cccd: str):
     if not DATABASE_URL:
         return
     try:
-        conn = psycopg.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO scraped_records (full_name, class_name, cccd) VALUES (%s, %s, %s) ON CONFLICT (cccd) DO NOTHING;",
@@ -93,7 +93,7 @@ def get_db_progress():
     if not DATABASE_URL:
         return TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
     try:
-        conn = psycopg.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute("SELECT province, year, gender, current_seq FROM scan_progress LIMIT 1;")
         row = cur.fetchone()
@@ -109,7 +109,7 @@ def save_db_progress(prov: str, year: str, gender: str, seq: int):
     if not DATABASE_URL:
         return
     try:
-        conn = psycopg.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
             "UPDATE scan_progress SET province = %s, year = %s, gender = %s, current_seq = %s, updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM scan_progress LIMIT 1);",
