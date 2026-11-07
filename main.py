@@ -10,6 +10,8 @@ load_dotenv()
 app = Flask(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+init_db()
+
 def get_all_records():
     """Lấy danh sách dữ liệu đã scan từ Neon DB"""
     if not DATABASE_URL:
@@ -37,7 +39,6 @@ def start_background_scanner():
     scanner_thread.start()
 
 if __name__ == "__main__":
-    init_db()  # Khởi tạo DB nếu chưa có
     # Kích hoạt luồng quét ngầm ngay khi app khởi động
     start_background_scanner()
     
