@@ -2,7 +2,7 @@ import os
 import time
 import requests
 from bs4 import BeautifulSoup
-import psycopg2
+import psycopg
 from dotenv import load_dotenv
 
 load_dotenv()
