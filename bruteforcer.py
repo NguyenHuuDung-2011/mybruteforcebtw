@@ -8,9 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Thay link mẫu bằng cấu trúc URL thực tế của bạn tại đây (ví dụ: chứa {cccd})
-BASE_URL = os.getenv("TARGET_URL_SITE")
+TARGET_URL_SITE = "https://example.com/search?q={cccd}"
 
 PROVINCES = [
     "001", "002", "003", "004", "005", "006", "007", "008", "009", "010",
@@ -32,14 +30,14 @@ REQUEST_DELAY = 0.3
 
 def init_db():
     if not DATABASE_URL:
-        print("[!] Lỗi: DATABASE_URL chưa được cấu hình trong .env")
+        print("[!] Lỗi: DATABASE_URL chưa được cấu hình")
         return
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS scraped_records (
+            CREATE TABLE IF NOT EXISTS scanned_records (
                 id SERIAL PRIMARY KEY,
                 full_name TEXT NOT NULL,
                 class_name TEXT,
@@ -80,7 +78,7 @@ def save_to_neon(full_name: str, class_name: str, cccd: str):
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO scraped_records (full_name, class_name, cccd) VALUES (%s, %s, %s) ON CONFLICT (cccd) DO NOTHING;",
+            "INSERT INTO scanned_records (full_name, class_name, cccd) VALUES (%s, %s, %s) ON CONFLICT (cccd) DO NOTHING;",
             (full_name, class_name, cccd)
         )
         conn.commit()
@@ -128,55 +126,4 @@ def run_scanner():
     print(f"[i] Tiếp tục quét từ DB - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SingleScanner"
-    }
-
-    prov_idx = TARGET_PROVINCES.index(cur_prov) if cur_prov in TARGET_PROVINCES else 0
-
-    for p_i in range(prov_idx, len(TARGET_PROVINCES)):
-        prov = TARGET_PROVINCES[p_i]
-        
-        year_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
-        for y_i in range(year_idx if p_i == prov_idx else 0, len(YEARS)):
-            year = YEARS[y_i]
-            
-            gender_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
-            for g_i in range(gender_idx if (p_i == prov_idx and y_i == year_idx) else 0, len(GENDERS)):
-                gender = GENDERS[g_i]
-                
-                prefix = f"{prov}{gender}{year}"
-                seq_start = cur_seq if (prov == cur_prov and year == cur_year and gender == cur_gender) else 0
-                cur_seq = 0 
-
-                for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
-                    cccd = f"{prefix}{seq:06d}"
-                    save_db_progress(prov, year, gender, seq)
-                    
-                    # Dùng trực tiếp biến BASE_URL định nghĩa ở trên
-                    url = BASE_URL.format(cccd=cccd)
-                    
-                    try:
-                        response = requests.get(url, headers=headers, timeout=10)
-                        response.raise_for_status()
-                        
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        table = soup.find('table', class_='qitc-bang')
-                        
-                        if table:
-                            rows = table.find_all('tr')
-                            for row in rows:
-                                cols = row.find_all('td')
-                                if len(cols) >= 4:
-                                    full_name = cols[2].get_text(strip=True)
-                                    class_name = cols[3].get_text(strip=True)
-                                    
-                                    save_to_neon(full_name, class_name, cccd)
-                                    print(f"[+] Tìm thấy! CCCD: {cccd} -> Họ tên: {full_name} | Lớp: {class_name}")
-                                    break
-                                    
-                    except requests.exceptions.RequestException:
-                        time.sleep(2)
-                    
-                    time.sleep(REQUEST_DELAY)
-
-    print("[i] Đã hoàn thành toàn bộ dải quét trên toàn quốc!")
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Single
