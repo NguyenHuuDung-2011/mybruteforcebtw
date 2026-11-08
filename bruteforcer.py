@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-TARGET_URL_SITE = "https://example.com/search?q={cccd}"
+TARGET_URL_SITE = os.getenv("TARGET_URL_SITE")
 
 PROVINCES = [
     "001", "002", "003", "004", "005", "006", "007", "008", "009", "010",
