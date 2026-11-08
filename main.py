@@ -3,23 +3,24 @@ import threading
 from flask import Flask, render_template
 import psycopg2
 from dotenv import load_dotenv
-from bruteforcer import run_scanner, init_db
+from bruteforcer import run_scanner, init_db, get_db_connection
 
 load_dotenv()
 
 app = Flask(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Khởi tạo bảng ngay khi module được load
 init_db()
 
 def get_all_records():
-    """Lấy danh sách dữ liệu đã scan từ Neon DB"""
-    if not DATABASE_URL:
+    """Lấy danh sách bản ghi đã tìm được hiển thị lên web"""
+    conn = get_db_connection()
+    if not conn:
         return []
     try:
-        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute("SELECT full_name, cccd, scanned_at FROM scanned_records ORDER BY id DESC;")
+        cur.execute("SELECT full_name, class_name, cccd, scanned_at FROM scanned_records ORDER BY id DESC;")
         records = cur.fetchall()
         cur.close()
         conn.close()
@@ -34,14 +35,12 @@ def index():
     return render_template("index.html", records=records)
 
 def start_background_scanner():
-    """Khởi chạy scraper ngầm trong một Background Thread riêng biệt"""
     scanner_thread = threading.Thread(target=run_scanner, daemon=True)
     scanner_thread.start()
 
+# Kích hoạt luồng chạy ngầm ngay khi app boot
+start_background_scanner()
+
 if __name__ == "__main__":
-    # Kích hoạt luồng quét ngầm ngay khi app khởi động
-    start_background_scanner()
-    
-    # Chạy ứng dụng Flask
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
