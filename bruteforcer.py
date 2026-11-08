@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-TARGET_URL_SITE = os.getenv("TARGET_URL_SITE")
+TARGET_URL_SITE = os.getenv("TARGET_URL_SITE", "https://example.com/search?q={cccd}")
 
 PROVINCES = [
     "001", "002", "003", "004", "005", "006", "007", "008", "009", "010",
@@ -28,14 +28,27 @@ GENDERS = ["2", "3"]
 HARDCODE_MAX_LIMIT = 80000    
 REQUEST_DELAY = 0.3           
 
-def init_db():
+def get_db_connection():
+    """Tạo kết nối mới đến Neon DB với cơ chế an toàn"""
     if not DATABASE_URL:
-        print("[!] Lỗi: DATABASE_URL chưa được cấu hình")
-        return
+        return None
     try:
         conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"[!] Lỗi kết nối DB: {e}")
+        return None
+
+def init_db():
+    """Khởi tạo cấu trúc bảng chuẩn xác, cố định ID = 1 cho progress"""
+    conn = get_db_connection()
+    if not conn:
+        print("[!] Không thể kết nối DB để khởi tạo.")
+        return
+    try:
         cur = conn.cursor()
         
+        # Bảng lưu kết quả trúng
         cur.execute("""
             CREATE TABLE IF NOT EXISTS scanned_records (
                 id SERIAL PRIMARY KEY,
@@ -46,9 +59,10 @@ def init_db():
             );
         """)
         
+        # Bảng lưu tiến độ với ID cố định = 1 để tránh lệch dòng
         cur.execute("""
             CREATE TABLE IF NOT EXISTS scan_progress (
-                id SERIAL PRIMARY KEY,
+                id INT PRIMARY KEY,
                 province VARCHAR(3) NOT NULL,
                 year VARCHAR(2) NOT NULL,
                 gender VARCHAR(1) NOT NULL,
@@ -57,10 +71,11 @@ def init_db():
             );
         """)
         
-        cur.execute("SELECT COUNT(*) FROM scan_progress;")
+        # Đảm bảo luôn có đúng 1 bản ghi tiến độ gốc với id = 1
+        cur.execute("SELECT COUNT(*) FROM scan_progress WHERE id = 1;")
         if cur.fetchone()[0] == 0:
             cur.execute(
-                "INSERT INTO scan_progress (province, year, gender, current_seq) VALUES (%s, %s, %s, %s);",
+                "INSERT INTO scan_progress (id, province, year, gender, current_seq) VALUES (1, %s, %s, %s, %s);",
                 (TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0)
             )
             
@@ -71,29 +86,14 @@ def init_db():
     except Exception as e:
         print(f"[!] Lỗi khởi tạo DB: {e}")
 
-def save_to_neon(full_name: str, class_name: str, cccd: str):
-    if not DATABASE_URL:
-        return
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO scanned_records (full_name, class_name, cccd) VALUES (%s, %s, %s) ON CONFLICT (cccd) DO NOTHING;",
-            (full_name, class_name, cccd)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"[!] Lỗi ghi DB: {e}")
-
 def get_db_progress():
-    if not DATABASE_URL:
+    """Đọc tiến độ hiện tại từ DB"""
+    conn = get_db_connection()
+    if not conn:
         return TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
     try:
-        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute("SELECT province, year, gender, current_seq FROM scan_progress LIMIT 1;")
+        cur.execute("SELECT province, year, gender, current_seq FROM scan_progress WHERE id = 1;")
         row = cur.fetchone()
         cur.close()
         conn.close()
@@ -104,86 +104,108 @@ def get_db_progress():
     return TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
 
 def save_db_progress(prov: str, year: str, gender: str, seq: int):
-    if not DATABASE_URL:
+    """Lưu tiến độ liên tục với id = 1 cố định, tự động reconnect nếu lỗi kết nối"""
+    conn = get_db_connection()
+    if not conn:
         return
     try:
-        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
-            "UPDATE scan_progress SET province = %s, year = %s, gender = %s, current_seq = %s, updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM scan_progress LIMIT 1);",
+            "UPDATE scan_progress SET province = %s, year = %s, gender = %s, current_seq = %s, updated_at = CURRENT_TIMESTAMP WHERE id = 1;",
             (prov, year, gender, seq)
         )
         conn.commit()
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"[!] Lỗi lưu tiến độ: {e}")
+        print(f"[!] Lỗi lưu tiến độ DB: {e}")
+
+def save_to_neon(full_name: str, class_name: str, cccd: str):
+    """Lưu thông tin tìm được vào bảng kết quả"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO scanned_records (full_name, class_name, cccd) VALUES (%s, %s, %s) ON CONFLICT (cccd) DO NOTHING;",
+            (full_name, class_name, cccd)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[!] Lỗi ghi record DB: {e}")
 
 def run_scanner():
+    """Hàm chạy quét chính được bao bọc bởi lớp chống sập toàn cục"""
     init_db()
     
-    cur_prov, cur_year, cur_gender, cur_seq = get_db_progress()
-    print(f"[i] Tiếp tục quét từ DB - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SingleScanner"
-    }
-
-    prov_idx = TARGET_PROVINCES.index(cur_prov) if cur_prov in TARGET_PROVINCES else 0
-
-    for p_i in range(prov_idx, len(TARGET_PROVINCES)):
-        prov = TARGET_PROVINCES[p_i]
-        
-        # Xác định năm bắt đầu
-        start_y_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
-        
-        for y_i in range(start_y_idx, len(YEARS)):
-            year = YEARS[y_i]
+    while True:
+        try:
+            cur_prov, cur_year, cur_gender, cur_seq = get_db_progress()
+            print(f"[i] Tiếp tục quét từ DB - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
             
-            # Xác định giới tính bắt đầu
-            start_g_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
-            
-            for g_i in range(start_g_idx, len(GENDERS)):
-                gender = GENDERS[g_i]
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SingleScanner"
+            }
+
+            prov_idx = TARGET_PROVINCES.index(cur_prov) if cur_prov in TARGET_PROVINCES else 0
+
+            for p_i in range(prov_idx, len(TARGET_PROVINCES)):
+                prov = TARGET_PROVINCES[p_i]
                 
-                # CHỈ LẤY cur_seq Ở VÒNG LẶP ĐẦU TIÊN KHI KHỞI ĐỘNG, CÁC VÒNG SAU BẮT ĐẦU TỪ 0
-                if prov == cur_prov and year == cur_year and gender == cur_gender:
-                    seq_start = cur_seq
-                    # Đã dùng xong mốc cũ, reset biến để các vòng lặp sau tự động chạy từ 0
-                    cur_prov, cur_year, cur_gender = "", "", "" 
-                else:
-                    seq_start = 0
-
-                for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
-                    cccd = f"{prov}{gender}{year}{seq:06d}"
+                start_y_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
+                
+                for y_i in range(start_y_idx, len(YEARS)):
+                    year = YEARS[y_i]
                     
-                    # Lưu progress liên tục vào DB
-                    save_db_progress(prov, year, gender, seq)
+                    start_g_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
                     
-                    url = TARGET_URL_SITE.format(cccd=cccd)
-                    
-                    try:
-                        response = requests.get(url, headers=headers, timeout=10)
-                        response.raise_for_status()
+                    for g_i in range(start_g_idx, len(GENDERS)):
+                        gender = GENDERS[g_i]
                         
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        table = soup.find('table', class_='qitc-bang')
-                        
-                        if table:
-                            rows = table.find_all('tr')
-                            for row in rows:
-                                cols = row.find_all('td')
-                                if len(cols) >= 4:
-                                    full_name = cols[2].get_text(strip=True)
-                                    class_name = cols[3].get_text(strip=True)
-                                    
-                                    save_to_neon(full_name, class_name, cccd)
-                                    print(f"[+] Tìm thấy! CCCD: {cccd} -> Họ tên: {full_name} | Lớp: {class_name}")
-                                    break
-                                    
-                    except requests.exceptions.RequestException:
-                        time.sleep(2)
-                    
-                    time.sleep(REQUEST_DELAY)
+                        if prov == cur_prov and year == cur_year and gender == cur_gender:
+                            seq_start = cur_seq
+                            cur_prov, cur_year, cur_gender = "", "", "" 
+                        else:
+                            seq_start = 0
 
-    print("[i] Đã hoàn thành toàn bộ dải quét trên toàn quốc!")
+                        for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
+                            cccd = f"{prov}{gender}{year}{seq:06d}"
+                            
+                            # Cập nhật tiến độ liên tục vào DB
+                            save_db_progress(prov, year, gender, seq)
+                            
+                            url = TARGET_URL_SITE.format(cccd=cccd)
+                            
+                            try:
+                                response = requests.get(url, headers=headers, timeout=10)
+                                response.raise_for_status()
+                                
+                                soup = BeautifulSoup(response.text, 'html.parser')
+                                table = soup.find('table', class_='qitc-bang')
+                                
+                                if table:
+                                    rows = table.find_all('tr')
+                                    for row in rows:
+                                        cols = row.find_all('td')
+                                        if len(cols) >= 4:
+                                            full_name = cols[2].get_text(strip=True)
+                                            class_name = cols[3].get_text(strip=True)
+                                            
+                                            save_to_neon(full_name, class_name, cccd)
+                                            print(f"[+] Tìm thấy! CCCD: {cccd} -> Họ tên: {full_name} | Lớp: {class_name}")
+                                            break
+                                            
+                            except requests.exceptions.RequestException:
+                                time.sleep(2)
+                            
+                            time.sleep(REQUEST_DELAY)
+
+            print("[i] Đã hoàn thành toàn bộ dải quét trên toàn quốc! Đợi 60s rồi quét lại từ đầu...")
+            time.sleep(60)
+            
+        except Exception as e:
+            print(f"[!] Lỗi nghiêm trọng trong luồng quét: {e}. Tự động khôi phục sau 5 giây...")
+            time.sleep(5)
