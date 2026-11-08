@@ -134,19 +134,30 @@ def run_scanner():
     for p_i in range(prov_idx, len(TARGET_PROVINCES)):
         prov = TARGET_PROVINCES[p_i]
         
-        year_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
-        for y_i in range(year_idx if p_i == prov_idx else 0, len(YEARS)):
+        # Xác định năm bắt đầu
+        start_y_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
+        
+        for y_i in range(start_y_idx, len(YEARS)):
             year = YEARS[y_i]
             
-            gender_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
-            for g_i in range(gender_idx if (p_i == prov_idx and y_i == year_idx) else 0, len(GENDERS)):
+            # Xác định giới tính bắt đầu
+            start_g_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
+            
+            for g_i in range(start_g_idx, len(GENDERS)):
                 gender = GENDERS[g_i]
                 
-                # Xác định điểm xuất phát sequence chuẩn xác
-                seq_start = cur_seq if (prov == cur_prov and year == cur_year and gender == cur_gender) else 0
+                # CHỈ LẤY cur_seq Ở VÒNG LẶP ĐẦU TIÊN KHI KHỞI ĐỘNG, CÁC VÒNG SAU BẮT ĐẦU TỪ 0
+                if prov == cur_prov and year == cur_year and gender == cur_gender:
+                    seq_start = cur_seq
+                    # Đã dùng xong mốc cũ, reset biến để các vòng lặp sau tự động chạy từ 0
+                    cur_prov, cur_year, cur_gender = "", "", "" 
+                else:
+                    seq_start = 0
 
                 for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
-                    cccd = f"{prov}{gender}{year}{seq:06d}" # Sửa lại format dải CCCD chuẩn 12 số: Tỉnh(3) + Giới(1) + Năm(2) + Seq(6)
+                    cccd = f"{prov}{gender}{year}{seq:06d}"
+                    
+                    # Lưu progress liên tục vào DB
                     save_db_progress(prov, year, gender, seq)
                     
                     url = TARGET_URL_SITE.format(cccd=cccd)
