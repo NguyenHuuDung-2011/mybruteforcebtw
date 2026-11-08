@@ -26,7 +26,7 @@ YEARS = ["09", "10", "11"]
 GENDERS = ["2", "3"]          
 
 HARDCODE_MAX_LIMIT = 80000    
-REQUEST_DELAY = 0.3           
+REQUEST_DELAY = 0.03           
 
 def get_db_connection():
     if not DATABASE_URL:
