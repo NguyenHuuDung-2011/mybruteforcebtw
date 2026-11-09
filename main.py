@@ -10,13 +10,12 @@ load_dotenv()
 app = Flask(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Tự động kích hoạt worker.py chạy độc lập ngay khi Flask khởi động (chỉ chạy 1 lần duy nhất)
+# Tự động khởi chạy worker.py độc lập ngay khi Flask boot (chỉ chạy 1 lần duy nhất)
 lock_file = "/tmp/scanner_started.lock"
 if not os.path.exists(lock_file):
     try:
         with open(lock_file, "w") as f:
             f.write("locked")
-        # Chạy worker.py như một tiến trình con hoàn toàn độc lập với Gunicorn
         subprocess.Popen([sys.executable, "worker.py"])
         print("[i] Đã khởi chạy tiến trình quét ngầm độc lập (worker.py) thành công!")
     except Exception as e:
