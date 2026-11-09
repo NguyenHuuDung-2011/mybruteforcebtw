@@ -8,25 +8,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-TARGET_URL_SITE = os.getenv("TARGET_URL_SITE")
+TARGET_URL_SITE = os.getenv("TARGET_URL_SITE", "https://example.com/search?q={cccd}")
 
-PROVINCES = [
-    "001", "002", "003", "004", "005", "006", "007", "008", "009", "010",
-    "011", "012", "013", "014", "015", "016", "017", "018", "019", "020",
-    "021", "022", "023", "024", "025", "026", "027", "028", "030", "031",
-    "032", "033", "034", "035", "036", "037", "038", "040", "042", "044",
-    "045", "046", "048", "049", "051", "052", "054", "056", "058", "060",
-    "062", "064", "066", "068", "070", "072", "074", "075", "077", "079",
-    "080", "082", "083", "084", "086", "087", "089", "091", "092", "093",
-    "094", "095", "096"
+# 20 Tỉnh thành phố trọng điểm / đông dân cư nhất
+TARGET_PROVINCES = [
+    "001", "079", "031", "048", "092", "074", "075", "040", "038", "035", 
+    "027", "030", "036", "034", "077", "042", "019", "025", "024", "026"
 ]
 
-TARGET_PROVINCES = PROVINCES   
-YEARS = ["09", "10", "11"]     
+# Thứ tự năm ưu tiên: 11 -> 10 -> 09
+YEARS = ["11", "10", "09"]     
+
+# Giới tính: 2 trước, 3 sau
 GENDERS = ["2", "3"]          
 
 HARDCODE_MAX_LIMIT = 80000    
-REQUEST_DELAY = 0.03           
+REQUEST_DELAY = 0.03          
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -125,23 +122,41 @@ def main():
     print("[i] Background Scanner Worker đang khởi động...")
     init_db()
     
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StandaloneWorker"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) OptimizedWorker"}
 
     while True:
         try:
             cur_prov, cur_year, cur_gender, cur_seq = get_db_progress()
-            print(f"[i] Tiếp tục quét - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
+            
+            # An toàn: Nếu tỉnh cũ không nằm trong danh sách mới, reset về đầu
+            try:
+                prov_idx = TARGET_PROVINCES.index(cur_prov)
+            except ValueError:
+                prov_idx = 0
+                cur_prov, cur_year, cur_gender, cur_seq = TARGET_PROVINCES[0], YEARS[0], GENDERS[0], 0
+                save_db_progress(cur_prov, cur_year, cur_gender, cur_seq)
 
-            prov_idx = TARGET_PROVINCES.index(cur_prov) if cur_prov in TARGET_PROVINCES else 0
+            print(f"[i] Đang quét - Tỉnh: {cur_prov} | Năm: {cur_year} | Giới tính: {cur_gender} | Seq: {cur_seq}")
 
+            # 1. Vòng lặp TỈNH
             for p_i in range(prov_idx, len(TARGET_PROVINCES)):
                 prov = TARGET_PROVINCES[p_i]
-                start_y_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
                 
+                try:
+                    start_y_idx = YEARS.index(cur_year) if (prov == cur_prov and cur_year in YEARS) else 0
+                except ValueError:
+                    start_y_idx = 0
+                
+                # 2. Vòng lặp NĂM (11 -> 10 -> 09)
                 for y_i in range(start_y_idx, len(YEARS)):
                     year = YEARS[y_i]
-                    start_g_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
                     
+                    try:
+                        start_g_idx = GENDERS.index(cur_gender) if (prov == cur_prov and year == cur_year and cur_gender in GENDERS) else 0
+                    except ValueError:
+                        start_g_idx = 0
+                    
+                    # 3. Vòng lặp GIỚI TÍNH (2 -> 3)
                     for g_i in range(start_g_idx, len(GENDERS)):
                         gender = GENDERS[g_i]
                         
@@ -151,6 +166,7 @@ def main():
                         else:
                             seq_start = 0
 
+                        # 4. Vòng lặp CHUỖI SỐ (0 -> 80000)
                         for seq in range(seq_start, HARDCODE_MAX_LIMIT + 1):
                             cccd = f"{prov}{gender}{year}{seq:06d}"
                             save_db_progress(prov, year, gender, seq)
@@ -176,7 +192,7 @@ def main():
                             
                             time.sleep(REQUEST_DELAY)
 
-            print("[i] Quét xong toàn bộ vòng, nghỉ 60s rồi quét lại từ đầu...")
+            print("[i] Hoàn tất toàn bộ chu kỳ 20 tỉnh, nghỉ 60s rồi lặp lại...")
             time.sleep(60)
 
         except Exception as e:
